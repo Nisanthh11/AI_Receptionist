@@ -1,0 +1,51 @@
+# Copy to .env and replace every placeholder. Never commit the real .env file.
+
+APP_NAME=AI Receptionist
+ENVIRONMENT=development
+
+# MySQL 8 (create the database first - see README). URL-encode special characters in the password.
+DATABASE_URL=mysql+pymysql://DB_USER:DB_PASSWORD@localhost:3306/ai_receptionist?charset=utf8mb4
+
+# Generate with:  python -c "import secrets; print(secrets.token_urlsafe(48))"   (min 32 characters)
+JWT_SECRET_KEY=REPLACE_WITH_LONG_RANDOM_SECRET_AT_LEAST_32_CHARS
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+
+# Comma-separated list of allowed frontend origins
+CORS_ORIGINS=http://localhost:5173
+
+# All appointment/visit times are stored as naive local times in this timezone
+TIMEZONE=Asia/Kolkata
+SLOT_MINUTES=30
+MIN_BOOKING_LEAD_MINUTES=30
+MAX_BOOKING_DAYS_AHEAD=60
+
+# Used only by `python -m app.seed` to create the first admin account (never hardcoded)
+SEED_ADMIN_EMAIL=admin@example.com
+SEED_ADMIN_PASSWORD=change-me-before-seeding
+SEED_ADMIN_NAME=System Administrator
+# Optional: also create a receptionist account when seeding
+SEED_RECEPTIONIST_EMAIL=
+SEED_RECEPTIONIST_PASSWORD=
+
+# Optional: Email Notifications (SMTP)
+# Leave SMTP_HOST empty for development mode (no external emails sent).
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM_EMAIL=reception@example.com
+SMTP_USE_TLS=true
+SMTP_USE_SSL=false
+
+# Optional: SMS Notifications
+# Options: auto, twilio, generic_http, none
+# Leave credentials empty for development mode (no external SMS sent).
+SMS_PROVIDER=auto
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_FROM_NUMBER=
+# Or generic HTTP SMS gateway:
+SMS_GATEWAY_URL=
+SMS_API_KEY=
+SMS_SENDER_ID=RECEPTION

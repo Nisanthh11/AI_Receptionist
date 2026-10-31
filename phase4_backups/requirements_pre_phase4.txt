@@ -1,0 +1,13 @@
+# Versions below are the exact versions the project was built and tested with.
+fastapi==0.148.0
+uvicorn[standard]==0.54.0
+SQLAlchemy==2.1.5
+alembic==1.20.0
+PyMySQL==1.2.3
+cryptography==50.0.2      # required by PyMySQL for MySQL 8 caching_sha2_password
+pydantic==2.14.1
+pydantic-settings==2.16.0
+email-validator==2.3.0
+bcrypt==5.0.0
+PyJWT==2.15.1
+tzdata==2026.5            # timezone database for Windows
