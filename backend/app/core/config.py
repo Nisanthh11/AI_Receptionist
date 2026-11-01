@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     sms_api_key: str | None = None
     sms_sender_id: str | None = None
 
+    # Telephony Voice Integration (Twilio / SIP)
+    telephony_provider: str = "twilio"
+    telephony_phone_number: str | None = None
+    telephony_webhook_url: str | None = None
+    telephony_reception_transfer_number: str | None = None
+    telephony_voice: str = "Polly.Joanna"
+    telephony_language: str = "en-US"
+    twilio_validate_signature: bool = False
+
     # Automatic Appointment Reminders (Part B)
     reminders_enabled: bool = True
     reminder_poll_interval_seconds: int = 30

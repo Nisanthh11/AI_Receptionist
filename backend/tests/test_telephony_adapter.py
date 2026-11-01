@@ -163,3 +163,166 @@ def test_telephony_status_callback(client):
     assert res.status_code == 200
     assert res.json()["status"] == "recorded"
     assert res.json()["call_status"] == "completed"
+
+
+def test_telephony_cancellation_by_reference_code(client, org):
+    """Caller can cancel an existing appointment over the phone by quoting reference code."""
+    # First book an appointment
+    inc_res = client.post(
+        "/api/telephony/incoming",
+        data={"CallSid": "CAcancel01", "From": "+919876543220"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    action = ET.fromstring(inc_res.text).find("Gather").attrib["action"]
+
+    def _telephony_turn(curr_action: str, speech: str) -> str:
+        r = client.post(
+            curr_action,
+            data={"CallSid": "CAcancel01", "SpeechResult": speech},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert r.status_code == 200, r.text
+        parsed = ET.fromstring(r.text)
+        gather_el = parsed.find("Gather")
+        return gather_el.attrib["action"] if gather_el is not None else ""
+
+    a1 = _telephony_turn(action, "book appointment")
+    a2 = _telephony_turn(a1, "Admissions")
+    a3 = _telephony_turn(a2, "Dr. Ravi")
+    a4 = _telephony_turn(a3, "tomorrow")
+    a5 = _telephony_turn(a4, "09:00 AM")
+    a6 = _telephony_turn(a5, "Alice Smith")
+    a7 = _telephony_turn(a6, "+919876543220")
+    a8 = _telephony_turn(a7, "skip")
+    a9 = _telephony_turn(a8, "Consultation")
+    fin = client.post(
+        a9,
+        data={"CallSid": "CAcancel01", "SpeechResult": "confirm"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert fin.status_code == 200
+    with SessionLocal() as db:
+        appt = db.query(Appointment).filter(Appointment.booking_source == "telephone").first()
+        assert appt is not None
+        ref_code = appt.reference_code
+
+    # New call from the caller requesting cancellation with reference code
+    call2 = client.post(
+        "/api/telephony/incoming",
+        data={"CallSid": "CAcancel02", "From": "+919876543220"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    action2 = ET.fromstring(call2.text).find("Gather").attrib["action"]
+
+    cancel_turn = client.post(
+        action2,
+        data={"CallSid": "CAcancel02", "SpeechResult": f"Please cancel my appointment {ref_code}"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert cancel_turn.status_code == 200
+    cancel_xml = ET.fromstring(cancel_turn.text)
+    gather_el = cancel_xml.find("Gather")
+    assert gather_el is not None
+    next_action = gather_el.attrib["action"]
+
+    # Confirm cancellation
+    confirm_turn = client.post(
+        next_action,
+        data={"CallSid": "CAcancel02", "SpeechResult": "yes, cancel it"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert confirm_turn.status_code == 200
+    confirm_xml = ET.fromstring(confirm_turn.text)
+    say_text = "".join(confirm_xml.itertext())
+    assert "cancelled" in say_text.lower()
+    assert confirm_xml.find("Hangup") is not None
+
+    with SessionLocal() as db:
+        updated = db.query(Appointment).filter(Appointment.reference_code == ref_code).first()
+        assert updated.status == "cancelled"
+        assert updated.slot_key is None
+        assert "telephone" in (updated.cancelled_reason or "").lower()
+
+
+def test_telephony_silence_escalation(client, org):
+    """Multiple silences escalate from reprompt to graceful termination or human transfer."""
+    inc = client.post(
+        "/api/telephony/incoming",
+        data={"CallSid": "CAsilence01", "From": "+919876543230"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    action = ET.fromstring(inc.text).find("Gather").attrib["action"]
+
+    # 1st silence -> reprompt
+    s1 = client.post(action, data={"CallSid": "CAsilence01", "SpeechResult": ""})
+    assert s1.status_code == 200
+    root1 = ET.fromstring(s1.text)
+    assert root1.find("Gather") is not None
+    assert "repeat" in "".join(root1.itertext()).lower()
+
+    # 2nd silence -> reprompt
+    s2 = client.post(action, data={"CallSid": "CAsilence01", "SpeechResult": "   "})
+    assert s2.status_code == 200
+    root2 = ET.fromstring(s2.text)
+    assert root2.find("Gather") is not None
+
+    # 3rd silence -> max silence reached: transfers to reception or hangs up
+    s3 = client.post(action, data={"CallSid": "CAsilence01", "SpeechResult": ""})
+    assert s3.status_code == 200
+    root3 = ET.fromstring(s3.text)
+    assert root3.find("Dial") is not None or root3.find("Hangup") is not None
+
+
+def test_telephony_failed_transfer_webhook(client):
+    """Twilio /transfer-status callback gracefully handles busy/failed receptionist transfer."""
+    res = client.post(
+        "/api/telephony/transfer-status",
+        data={"CallSid": "CAtransferfail01", "DialCallStatus": "busy"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert res.status_code == 200
+    root = ET.fromstring(res.text)
+    assert root.find("Hangup") is not None
+    assert "unable to take your call" in "".join(root.itertext()).lower()
+
+
+def test_telephony_signature_validation(client, monkeypatch):
+    """Validates X-Twilio-Signature verification behavior when enabled."""
+    import base64, hashlib, hmac
+    from app.core.config import get_settings
+    from app.telephony.twilio_adapter import validate_twilio_request
+
+    auth_token = "secret-twilio-token-12345"
+    url = "http://testserver/api/telephony/status"
+    params = {"CallSid": "CAtestsign", "CallStatus": "completed"}
+
+    # Generate genuine HMAC signature
+    valid_sig = validate_twilio_request(auth_token, url, params, "dummy")
+    assert not valid_sig  # dummy is invalid
+
+    data = url + "".join(f"{k}{params[k]}" for k in sorted(params.keys()))
+    genuine_sig = base64.b64encode(hmac.new(auth_token.encode("utf-8"), data.encode("utf-8"), hashlib.sha1).digest()).decode("utf-8")
+    assert validate_twilio_request(auth_token, url, params, genuine_sig)
+
+    # Enable signature validation in settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "twilio_validate_signature", True)
+    monkeypatch.setattr(settings, "twilio_auth_token", auth_token)
+
+    # Request without header should be rejected 403
+    r_no_sig = client.post("/api/telephony/status", data=params)
+    assert r_no_sig.status_code == 403
+
+    # Request with invalid header should be rejected 403
+    r_bad_sig = client.post("/api/telephony/status", data=params, headers={"X-Twilio-Signature": "invalid-sig"})
+    assert r_bad_sig.status_code == 403
+
+
+def test_telephony_config_endpoint(client):
+    """GET /api/telephony/config returns structured status without exposing secrets."""
+    res = client.get("/api/telephony/config")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["provider"] == "twilio"
+    assert "ready_for_live_calls" in data
+    assert "auth_token" not in data

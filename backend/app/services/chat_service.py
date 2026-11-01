@@ -17,7 +17,8 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.errors import AppError
 from app.core.timeutils import now_local
-from app.models import FAQ, Conversation, Department, Message, OrganizationInfo, Staff
+from app.models import Appointment, FAQ, Conversation, Department, Message, OrganizationInfo, Staff, Visitor
+from app.models.appointment import ACTIVE_STATUSES, STATUS_CANCELLED, STATUS_COMPLETED, STATUS_CONFIRMED, STATUS_PENDING
 from app.services import appointment_service as appts
 from app.services.date_parser import parse_natural_date, parse_time_preference
 from app.services.gemini_service import GeminiIntent, GeminiInterpretation, GeminiService
@@ -383,6 +384,22 @@ def _is_ambiguous_appointment_query(message: str) -> bool:
     return m in ("appointment", "appointments", "appointment?", "appointments?", "about appointment", "appointment details")
 
 
+_CANCEL_APPT_WORDS = re.compile(
+    r"\b(cancel|cancellation|call off|drop|delete|revoke)\b.*\b(appointment|booking|visit|slot|meeting)\b|"
+    r"\b(appointment|booking|visit|slot|meeting)\b.*\b(cancel|cancellation|call off|drop|delete|revoke)\b",
+    re.I,
+)
+
+
+def _is_cancel_appointment_intent(message: str) -> bool:
+    m = message.lower().strip()
+    if _CANCEL_APPT_WORDS.search(m):
+        return True
+    if any(m.startswith(p) for p in ("cancel appt", "cancel booking", "cancel appointment", "cancel my appointment", "cancel my booking")):
+        return True
+    return False
+
+
 class RuleBasedResponder(ResponderProvider):
     name = "rule-based-faq"
 
@@ -429,6 +446,81 @@ class RuleBasedResponder(ResponderProvider):
                         action="booking_completed",
                         suggestions=["Check Status", "Book another appointment"],
                         booking_flow=session.to_flow_dict(),
+                    )
+
+        # Active cancellation state machine
+        if session and session.step == "cancellation_confirm":
+            if any(w in msg_lower for w in ("yes", "confirm", "proceed", "cancel it", "yes cancel", "sure", "ok")):
+                appt = None
+                if session.reference_code:
+                    appt = db.execute(select(Appointment).where(func.upper(Appointment.reference_code) == session.reference_code.upper())).scalar_one_or_none()
+                if appt and appt.status in (STATUS_PENDING, STATUS_CONFIRMED):
+                    appts.update_status(db, appt.id, STATUS_CANCELLED, reason=f"Cancelled by user via {session.booking_source or 'telephone'}")
+                    db.commit()
+                    ref_code = appt.reference_code
+                    session.step = "idle"
+                    session.reference_code = None
+                    return ChatReply(
+                        f"Your appointment with {appt.staff.full_name} on {appt.start_at.strftime('%A, %B %d at %I:%M %p')} (reference code {ref_code}) has been successfully cancelled.",
+                        "appointment_cancelled",
+                        action="cancellation_completed",
+                        suggestions=["Book an appointment", "What are your working hours?"],
+                    )
+                else:
+                    session.step = "idle"
+                    return ChatReply(
+                        "I could not find an active appointment to cancel. How else can I assist you today?",
+                        "cancellation_failed",
+                        suggestions=SUGGESTIONS,
+                    )
+            elif any(w in msg_lower for w in ("no", "keep", "don't cancel", "dont cancel", "stop", "abort", "nevermind")):
+                session.step = "idle"
+                return ChatReply(
+                    "Your appointment remains confirmed. How else can I help you today?",
+                    "cancellation_aborted",
+                    suggestions=SUGGESTIONS,
+                )
+
+        if session and session.step == "cancellation_code":
+            if any(cw in msg_lower for cw in ("cancel", "stop", "nevermind", "exit", "no")):
+                session.step = "idle"
+                return ChatReply("Cancellation cancelled. How else can I help you today?", "cancellation_aborted", suggestions=SUGGESTIONS)
+            code_m = re.search(r"\b(?:APT-)?([A-Z0-9]{8})\b", message, re.I)
+            if code_m:
+                raw_code = code_m.group(1).upper()
+                ref_code = f"APT-{raw_code}" if not raw_code.startswith("APT-") else raw_code
+                appt = db.execute(select(Appointment).where(func.upper(Appointment.reference_code) == ref_code)).scalar_one_or_none()
+                if not appt:
+                    return ChatReply(f"I could not find an appointment with reference code {ref_code}. Please check the code or say cancel to return.", "cancellation_not_found", suggestions=["Cancel"])
+                if appt.status == STATUS_CANCELLED:
+                    session.step = "idle"
+                    return ChatReply(f"Appointment {ref_code} was already cancelled previously.", "appointment_already_cancelled", suggestions=SUGGESTIONS)
+                if appt.status == STATUS_COMPLETED:
+                    session.step = "idle"
+                    return ChatReply(f"Appointment {ref_code} was already completed and cannot be cancelled.", "appointment_already_completed", suggestions=SUGGESTIONS)
+
+                caller_phone = session.phone or ""
+                visitor_phone = appt.visitor.phone or ""
+                caller_digits = re.sub(r"\D", "", caller_phone)
+                visitor_digits = re.sub(r"\D", "", visitor_phone)
+
+                if caller_digits and visitor_digits and (caller_digits.endswith(visitor_digits[-8:]) or visitor_digits.endswith(caller_digits[-8:])):
+                    appts.update_status(db, appt.id, STATUS_CANCELLED, reason=f"Cancelled by user via {session.booking_source or 'telephone'}")
+                    db.commit()
+                    session.step = "idle"
+                    return ChatReply(
+                        f"Your appointment with {appt.staff.full_name} on {appt.start_at.strftime('%A, %B %d at %I:%M %p')} (reference code {ref_code}) has been successfully cancelled.",
+                        "appointment_cancelled",
+                        action="cancellation_completed",
+                        suggestions=["Book an appointment", "What are your working hours?"],
+                    )
+                else:
+                    session.reference_code = ref_code
+                    session.step = "cancellation_confirm"
+                    return ChatReply(
+                        f"I located appointment {ref_code} with {appt.staff.full_name} on {appt.start_at.strftime('%A, %B %d at %I:%M %p')}. Are you sure you want to cancel this appointment?",
+                        "cancellation_confirm",
+                        suggestions=["Yes, cancel it", "No, keep it"],
                     )
 
         # 1. Visitor asks to cancel or restart during an active flow
@@ -592,6 +684,72 @@ class RuleBasedResponder(ResponderProvider):
                 "Are you looking to book an appointment with our reception or staff, or do you have a question about an existing appointment?",
                 "clarification",
                 suggestions=["I want to book an appointment", "Check appointment status", "What are your working hours?"],
+            )
+
+        # 6.5 Explicit cancel appointment intent
+        if _is_cancel_appointment_intent(message):
+            tok = session_token or uuid.uuid4().hex
+            if not session:
+                session = BookingSession(session_token=tok, step="idle")
+                _booking_sessions[tok] = session
+
+            code_m = re.search(r"\b(?:APT-)?([A-Z0-9]{8})\b", message, re.I)
+            if code_m:
+                raw_code = code_m.group(1).upper()
+                ref_code = f"APT-{raw_code}" if not raw_code.startswith("APT-") else raw_code
+                appt = db.execute(select(Appointment).where(func.upper(Appointment.reference_code) == ref_code)).scalar_one_or_none()
+                if not appt:
+                    return ChatReply(f"I could not find an appointment with reference code {ref_code}. Please check the code and try again.", "cancellation_not_found", suggestions=["Cancel"])
+                if appt.status == STATUS_CANCELLED:
+                    return ChatReply(f"Appointment {ref_code} has already been cancelled.", "appointment_already_cancelled", suggestions=SUGGESTIONS)
+                if appt.status == STATUS_COMPLETED:
+                    return ChatReply(f"Appointment {ref_code} was already completed and cannot be cancelled.", "appointment_already_completed", suggestions=SUGGESTIONS)
+
+                caller_phone = session.phone or ""
+                visitor_phone = appt.visitor.phone or ""
+                caller_digits = re.sub(r"\D", "", caller_phone)
+                visitor_digits = re.sub(r"\D", "", visitor_phone)
+                if caller_digits and visitor_digits and (caller_digits.endswith(visitor_digits[-8:]) or visitor_digits.endswith(caller_digits[-8:])):
+                    appts.update_status(db, appt.id, STATUS_CANCELLED, reason=f"Cancelled by user via {session.booking_source or 'telephone'}")
+                    db.commit()
+                    session.step = "idle"
+                    return ChatReply(
+                        f"Your appointment with {appt.staff.full_name} on {appt.start_at.strftime('%A, %B %d at %I:%M %p')} (reference code {ref_code}) has been successfully cancelled.",
+                        "appointment_cancelled",
+                        action="cancellation_completed",
+                        suggestions=["Book an appointment", "What are your working hours?"],
+                    )
+                else:
+                    session.reference_code = ref_code
+                    session.step = "cancellation_confirm"
+                    return ChatReply(
+                        f"I located appointment {ref_code} with {appt.staff.full_name} on {appt.start_at.strftime('%A, %B %d at %I:%M %p')}. Would you like me to cancel this appointment?",
+                        "cancellation_confirm",
+                        suggestions=["Yes, cancel it", "No, keep it"],
+                    )
+
+            if session.phone:
+                active_appts = db.execute(
+                    select(Appointment).join(Visitor).where(
+                        Appointment.status.in_(ACTIVE_STATUSES),
+                        Visitor.phone == session.phone,
+                    ).order_by(Appointment.start_at.asc())
+                ).scalars().all()
+                if len(active_appts) == 1:
+                    appt = active_appts[0]
+                    session.reference_code = appt.reference_code
+                    session.step = "cancellation_confirm"
+                    return ChatReply(
+                        f"I found your upcoming appointment with {appt.staff.full_name} on {appt.start_at.strftime('%A, %B %d at %I:%M %p')} (reference code {appt.reference_code}). Would you like me to cancel this appointment?",
+                        "cancellation_confirm",
+                        suggestions=["Yes, cancel it", "No, keep it"],
+                    )
+
+            session.step = "cancellation_code"
+            return ChatReply(
+                "Please provide your appointment reference code (for example, APT-12345678) to cancel your appointment.",
+                "cancellation_request_code",
+                suggestions=["Cancel"],
             )
 
         # 7. Explicit appointment booking intent -> start guided conversational booking!
@@ -1087,6 +1245,8 @@ class RuleBasedResponder(ResponderProvider):
 
         # Step: visitor_phone
         if session.step == "visitor_phone":
+            if session.phone and any(w in msg_lower for w in ("same", "this number", "same number", "current number", "use this number", "calling from", "yes", "use my number")):
+                msg_clean = session.phone
             digits = re.sub(r"[^\d]", "", msg_clean)
             if len(digits) < 8 or len(digits) > 15:
                 return ChatReply(

@@ -140,7 +140,7 @@ class VoiceService:
                 )
 
         # 6. Check if session completed
-        is_final = bool(reply.action == "booking_completed")
+        is_final = bool(reply.action in ("booking_completed", "cancellation_completed"))
 
         return VoiceTurnResult(
             session_token=token,
