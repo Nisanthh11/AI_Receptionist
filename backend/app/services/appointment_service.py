@@ -4,7 +4,7 @@ import logging
 import secrets
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -538,3 +538,97 @@ def search(db: Session, *, q: str | None, status: str | None, department_id: int
     rows = db.execute(stmt.order_by(Appointment.start_at.desc(), Appointment.id.desc())
                       .limit(page_size).offset((page - 1) * page_size)).unique().scalars().all()
     return rows, total
+
+
+def check_in_appointment(
+    db: Session,
+    reference_code: str,
+    *,
+    checked_in_by_user_id: int | None = None,
+) -> Appointment:
+    """Locates and checks in an appointment by its reference code.
+
+    Enforces business rules:
+    - Reference code must exist.
+    - Appointment must not be cancelled or completed.
+    - Appointment must be scheduled for today (organization local date).
+    - Prevents duplicate check-ins via row locking and transaction boundary.
+    - Records checked_in_at using organization local time.
+    - Leaves appointment status intact (does not mark completed prematurely).
+    """
+    ref = (reference_code or "").strip().upper()
+    if not ref:
+        raise AppError(404, "Appointment reference code is required.")
+
+    try:
+        # Lock bare row using with_for_update() to prevent concurrent check-in races
+        locked_id = db.execute(
+            select(Appointment.id)
+            .where(Appointment.reference_code == ref)
+            .with_for_update()
+        ).scalar_one_or_none()
+
+        if locked_id is None:
+            raise AppError(404, f"No appointment found with reference code '{ref}'.")
+
+        # Load the appointment object with joined relationships
+        appt = db.execute(
+            select(Appointment).where(Appointment.id == locked_id)
+        ).unique().scalar_one()
+
+        # Reject cancelled appointments
+        if appt.status == STATUS_CANCELLED:
+            raise AppError(409, f"Cannot check in: Appointment {ref} has been cancelled.")
+
+        # Reject already completed appointments
+        if appt.status == STATUS_COMPLETED:
+            raise AppError(409, f"Cannot check in: Appointment {ref} has already been marked completed.")
+
+        # Prevent duplicate check-in
+        if appt.checked_in_at is not None:
+            formatted_time = appt.checked_in_at.strftime("%H:%M")
+            raise AppError(409, f"Appointment {ref} is already checked in (at {formatted_time}).")
+
+        # Reject appointments not scheduled for the current local calendar date
+        current_now = now_local()
+        today = current_now.date()
+        appt_date = appt.start_at.date()
+        if appt_date != today:
+            raise AppError(
+                409,
+                f"Cannot check in: Appointment {ref} is scheduled for {appt_date.strftime('%d %b %Y')}, "
+                f"not today ({today.strftime('%d %b %Y')}).",
+            )
+
+        # Atomic check-in update: ensures exactly one concurrent request succeeds
+        update_result = db.execute(
+            update(Appointment)
+            .where(
+                Appointment.id == appt.id,
+                Appointment.checked_in_at.is_(None),
+            )
+            .values(checked_in_at=current_now)
+        )
+        if update_result.rowcount == 0:
+            raise AppError(409, f"Appointment {ref} is already checked in.")
+
+        appt.checked_in_at = current_now
+
+        # Notification for staff audit log and dashboard
+        db.add(
+            Notification(
+                type="appointment_checked_in",
+                appointment_id=appt.id,
+                message=f"Appointment {appt.reference_code} checked in at {current_now.strftime('%H:%M')}.",
+            )
+        )
+        db.commit()
+        db.refresh(appt)
+        return appt
+    except AppError:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.exception("Unexpected error during appointment check-in: %s", e)
+        raise

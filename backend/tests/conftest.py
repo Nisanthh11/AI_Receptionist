@@ -25,6 +25,9 @@ os.environ["TWILIO_ACCOUNT_SID"] = ""
 os.environ["SMS_GATEWAY_URL"] = ""
 os.environ["GEMINI_ENABLED"] = "false"
 os.environ["GEMINI_API_KEY"] = ""
+os.environ["VOICELINK_WEBHOOK_SECRET"] = ""
+os.environ["STT_PROVIDER"] = "mock"
+os.environ["TTS_PROVIDER"] = "mock"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

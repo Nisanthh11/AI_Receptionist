@@ -142,6 +142,65 @@ export default function Book() {
         </dl>
       </div>
 
+      {/* Appointment Digital Pass with QR Code */}
+      <div className="mt-4 rounded-xl border border-indigo-200 bg-white p-4 shadow-xs text-left">
+        <div className="flex flex-col sm:flex-row items-center gap-4">
+          {/* QR Code Display */}
+          <div className="flex flex-col items-center shrink-0">
+            {result.qr_code ? (
+              <div className="rounded-lg border border-slate-200 bg-white p-2 shadow-2xs">
+                <img
+                  src={result.qr_code}
+                  alt={`QR Code Pass for ${result.reference_code}`}
+                  className="h-32 w-32 object-contain"
+                />
+              </div>
+            ) : (
+              <div className="flex h-32 w-32 flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 p-2 text-center">
+                <span className="text-xl">📱</span>
+                <span className="mt-1 text-[11px] text-slate-400">QR unavailable</span>
+              </div>
+            )}
+            <span className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              Check-in Pass
+            </span>
+          </div>
+
+          {/* Pass Details & Instructions */}
+          <div className="flex flex-1 flex-col justify-between self-stretch">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-200">
+                  Touchless Check-in
+                </span>
+                <span className="text-xs text-slate-400 font-mono">
+                  {result.reference_code}
+                </span>
+              </div>
+              <h3 className="mt-1 text-sm font-bold text-slate-800">
+                Front Desk Visitor Pass
+              </h3>
+              <p className="mt-1 text-xs text-slate-500 leading-relaxed">
+                Save this QR code on your phone or take a screenshot. Present it to the front desk scanner upon arrival for instant, touchless check-in.
+              </p>
+            </div>
+
+            {/* Download / Save Button */}
+            {result.qr_code && (
+              <div className="mt-3 pt-2 border-t border-slate-100 flex items-center gap-2">
+                <a
+                  href={result.qr_code}
+                  download={`appointment-pass-${result.reference_code}.png`}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50/80 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 hover:text-indigo-900 transition shadow-2xs"
+                >
+                  <span>📥</span> Save / Download QR Pass
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {result.message && (
         <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-left text-xs text-slate-600 shadow-xs">
           <p className="font-semibold text-slate-700 mb-1">Notification Status:</p>

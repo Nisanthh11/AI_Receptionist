@@ -47,7 +47,7 @@ def test_public_booking_response_has_no_visitor_details(client, org):
     text = r.text
     for private in ("Unique Visitor Name", "9000011111", "secret@visitor.example"):
         assert private not in text
-    assert set(r.json()) == {"reference_code", "status", "start_at", "end_at", "staff_name", "department_name", "message"}
+    assert set(r.json()) == {"reference_code", "status", "start_at", "end_at", "staff_name", "department_name", "message", "qr_code"}
 
 
 def test_double_booking_same_slot_is_rejected(client, org):

@@ -19,6 +19,7 @@ from app.schemas.visitor import WalkInRegistration, WalkInResult
 from app.services import appointment_service as appts
 from app.services import visitor_service
 from app.services.chat_service import ChatService, HybridGeminiResponder, RuleBasedResponder
+from app.services.qr_service import generate_appointment_qr_data_url
 
 router = APIRouter(prefix="/api/public", tags=["Public (visitor)"])
 
@@ -34,6 +35,7 @@ def _result(appt) -> PublicBookingResult:
         msg = f"{base_msg} {notif.message}".strip()
     else:
         msg = base_msg
+    qr_data_url = generate_appointment_qr_data_url(appt.reference_code)
     return PublicBookingResult(
         reference_code=appt.reference_code,
         status=appt.status,
@@ -42,6 +44,7 @@ def _result(appt) -> PublicBookingResult:
         staff_name=appt.staff.full_name,
         department_name=appt.department.name,
         message=msg,
+        qr_code=qr_data_url or None,
     )
 
 

@@ -1,0 +1,63 @@
+"""Telephony module supporting PSTN carriers, SIP, and WebSocket voice integrations."""
+from app.telephony.audio_codec import (
+    AudioCodec,
+    AudioCodecError,
+    InvalidAudioFrameError,
+    UnsupportedCodecError,
+    alaw_to_slin,
+    calculate_duration_ms,
+    calculate_frame_energy,
+    chunk_audio_frames,
+    generate_silence,
+    generate_tone,
+    normalize_codec,
+    slin_to_alaw,
+    slin_to_wav_bytes,
+    validate_audio_frame,
+)
+from app.telephony.base import BaseTelephonyAdapter
+from app.telephony.speech_service import (
+    DeepgramAuraTextToSpeechService,
+    GroqWhisperSpeechToTextService,
+    MockSpeechToTextService,
+    MockTextToSpeechService,
+    SpeechToTextService,
+    SynthesisResult,
+    TextToSpeechService,
+    TranscriptionResult,
+    get_speech_to_text_service,
+    get_text_to_speech_service,
+)
+from app.telephony.twilio_adapter import TwilioVoiceAdapter
+from app.telephony.voicelink_adapter import VoiceLinkCallSession, VoiceLinkWebSocketAdapter
+
+__all__ = [
+    "BaseTelephonyAdapter",
+    "TwilioVoiceAdapter",
+    "VoiceLinkWebSocketAdapter",
+    "VoiceLinkCallSession",
+    "AudioCodec",
+    "AudioCodecError",
+    "UnsupportedCodecError",
+    "InvalidAudioFrameError",
+    "normalize_codec",
+    "validate_audio_frame",
+    "alaw_to_slin",
+    "slin_to_alaw",
+    "chunk_audio_frames",
+    "calculate_duration_ms",
+    "calculate_frame_energy",
+    "generate_silence",
+    "generate_tone",
+    "SpeechToTextService",
+    "TextToSpeechService",
+    "MockSpeechToTextService",
+    "MockTextToSpeechService",
+    "GroqWhisperSpeechToTextService",
+    "DeepgramAuraTextToSpeechService",
+    "get_speech_to_text_service",
+    "get_text_to_speech_service",
+    "TranscriptionResult",
+    "SynthesisResult",
+    "slin_to_wav_bytes",
+]

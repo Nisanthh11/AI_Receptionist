@@ -13,3 +13,4 @@ PyJWT==2.15.1
 tzdata==2026.5            # timezone database for Windows
 google-genai>=2.0.0
 python-multipart>=0.0.20
+segno==1.6.6

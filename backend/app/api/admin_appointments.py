@@ -6,8 +6,15 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import require_staff
 from app.core.errors import AppError
-from app.models import Appointment
-from app.schemas.appointment import AppointmentList, AppointmentOut, CancelRequest, RescheduleRequest, StatusUpdate
+from app.models import Appointment, User
+from app.schemas.appointment import (
+    AppointmentCheckInResult,
+    AppointmentList,
+    AppointmentOut,
+    CancelRequest,
+    RescheduleRequest,
+    StatusUpdate,
+)
 from app.services import appointment_service as svc
 
 router = APIRouter(prefix="/api/admin/appointments", tags=["Admin: appointments"], dependencies=[Depends(require_staff)])
@@ -54,3 +61,24 @@ def reschedule(appointment_id: int, payload: RescheduleRequest, db: Session = De
 @router.post("/{appointment_id}/cancel", response_model=AppointmentOut)
 def cancel(appointment_id: int, payload: CancelRequest, db: Session = Depends(get_db)):
     return svc.update_status(db, appointment_id, "cancelled", reason=payload.reason)
+
+
+@router.post("/{reference_code}/checkin", response_model=AppointmentCheckInResult)
+def check_in_appointment_by_reference(
+    reference_code: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_staff),
+):
+    """Securely check in an arriving visitor by appointment reference code."""
+    appt = svc.check_in_appointment(db, reference_code, checked_in_by_user_id=current_user.id)
+    return AppointmentCheckInResult(
+        reference_code=appt.reference_code,
+        status=appt.status,
+        checked_in_at=appt.checked_in_at,
+        start_at=appt.start_at,
+        end_at=appt.end_at,
+        department_name=appt.department.name if appt.department else "",
+        staff_name=appt.staff.full_name if appt.staff else "",
+        visitor_name=appt.visitor.full_name if appt.visitor else "",
+        message=f"Appointment {appt.reference_code} checked in successfully.",
+    )

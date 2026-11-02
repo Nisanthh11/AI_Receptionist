@@ -25,6 +25,7 @@ class PublicBookingResult(BaseModel):
     staff_name: str
     department_name: str
     message: str
+    qr_code: str | None = None
 
 
 class UserAppointmentOut(BaseModel):
@@ -38,6 +39,7 @@ class UserAppointmentOut(BaseModel):
     department_name: str
     notes: str | None = None
     cancelled_reason: str | None = None
+    checked_in_at: datetime | None = None
     created_at: datetime
     sms_status: str | None = None
     email_status: str | None = None
@@ -113,11 +115,26 @@ class AppointmentOut(ORMModel):
     purpose: str
     notes: str | None
     cancelled_reason: str | None
+    checked_in_at: datetime | None = None
     created_at: datetime
     visitor: VisitorBrief
     staff: StaffBrief
     department: DepartmentBrief
     reminders: list[AppointmentReminderOut] = []
+
+
+class AppointmentCheckInResult(BaseModel):
+    """Safe, minimal result returned upon front desk check-in without exposing unnecessary visitor PII."""
+
+    reference_code: str
+    status: str
+    checked_in_at: datetime
+    start_at: datetime
+    end_at: datetime
+    department_name: str
+    staff_name: str
+    visitor_name: str
+    message: str = "Appointment checked in successfully."
 
 
 class AppointmentList(BaseModel):

@@ -60,6 +60,7 @@ class Appointment(Base):
     # active (pending/confirmed), NULL otherwise. NULLs do not collide in a UNIQUE index (MySQL/SQLite),
     # so cancelled/completed appointments free the slot.
     slot_key: Mapped[str | None] = mapped_column(String(40), unique=True)
+    checked_in_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now_local)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now_local, onupdate=now_local)
 

@@ -59,6 +59,19 @@ class Settings(BaseSettings):
     telephony_language: str = "en-US"
     twilio_validate_signature: bool = False
 
+    # VoiceLink WebSocket Integration (Phase 3 & 3.1)
+    voicelink_webhook_secret: str | None = None
+
+    # Speech Services for VoiceLink Telephony (Phase 4)
+    stt_provider: str = "mock"  # "mock", "groq"
+    tts_provider: str = "mock"  # "mock", "deepgram"
+    groq_api_key: str | None = None
+    deepgram_api_key: str | None = None
+    deepgram_tts_model: str = "aura-asteria-en"
+    voicelink_vad_silence_threshold: float = 300.0
+    voicelink_vad_silence_frames: int = 35  # 35 * 20ms = 700ms silence
+    voicelink_pacing_delay_ms: float = 0.0
+
     # Automatic Appointment Reminders (Part B)
     reminders_enabled: bool = True
     reminder_poll_interval_seconds: int = 30

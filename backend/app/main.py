@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api import (admin_appointments, admin_dashboard, admin_directory,
-                     admin_visitors, auth, public, telephony, user_appointments, voice)
+                     admin_visitors, auth, public, telephony, telephony_voicelink, user_appointments, voice)
 from app.core.config import get_settings
 from app.core.database import SessionLocal, get_db
 from app.core.errors import register_error_handlers
@@ -86,6 +86,6 @@ def health(db: Session = Depends(get_db)):
     return {"status": "ok", "database": "ok"}
 
 
-for _r in (auth.router, public.router, voice.router, telephony.router, user_appointments.router, admin_appointments.router,
+for _r in (auth.router, public.router, voice.router, telephony.router, telephony_voicelink.router, user_appointments.router, admin_appointments.router,
            admin_visitors.router, admin_directory.router, admin_dashboard.router):
     app.include_router(_r)
